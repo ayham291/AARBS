@@ -148,6 +148,42 @@ putgitrepo() { # Downloads a gitrepo $1 and places the files in $2 only overwrit
 	sudo -u "$name" cp -rfT "$dir" "$2"
 	}
 
+makewifi() {
+    dialog --colors --title " Enable wifi " --yesno "Would you like to enable wifi?" 5 40
+    if [ $? = 0 ]; then
+        dialog --infobox "$?" 5 40
+        wifi=$(dialog --inputbox "First, please enter a name of the wiFi." 8 60 3>&1 1>&2 2>&3 3>&1) || exit 1
+        wifipass=$(dialog --no-cancel --passwordbox "Enter a password for that WiFi." 8 60 3>&1 1>&2 2>&3 3>&1)
+        dialog --infobox "Preparing wifi..." 4 50
+        sudo pacman -S --noconfirm --needed wpa_supplicant wpa_supplicant-gui
+    echo "ctrl_interface=/run/wpa_supplicant
+ctrl_interface_group=wheel
+update_config=1
+
+network={
+    ssid=\"$wifi\"
+    psk=\"$wifipass\"
+    key_mgmt=WPA-PSK
+    pairwise=CCMP TKIP
+    group=CCMP TKIP
+}"          | sudo tee /etc/wpa_supplicant/wpa_supplicant.conf > /dev/null
+        sudo systemctl enable wpa_supplicant.service
+        sudo systemctl start wpa_supplicant.service
+        dialog --infobox "Wifi is enabled connected to $wifi" 4 50
+        sleep 1 && ping "archlinux.org" -c 1 >/dev/null 2>&1 && dialog --infobox "Connected to the internet" 4 50
+    fi
+    }
+
+optimusmanager() {
+    dialog --colors --title " Enable Optimus Manager " --yesno "Would you like to enable Optimus Manager?" 5 40
+    if [ $? = 0 ]; then
+        dialog --infobox "$?" 5 40
+        aurinstall optimusmanager
+        sudo systemctl enable optimus-manager.service
+        sudo systemctl start optimus-manager.service
+    fi
+    }
+
 systembeepoff() { dialog --infobox "Getting rid of that retarded error beep sound..." 10 50
 	rmmod pcspkr
 	echo "blacklist pcspkr" > /etc/modprobe.d/nobeep.conf ;}
@@ -255,6 +291,12 @@ grep -q "OTHER_OPTS='-a pulseaudio -m alsa_seq -r 48000'" /etc/conf.d/fluidsynth
 
 # Start/restart PulseAudio.
 pkill -15 -x 'pulseaudio'; sudo -u "$name" pulseaudio --start
+
+# Setup WiFi with WPA_SUPPLICANT.
+makewifi
+
+# Enable Optimusmanager
+optimusmanager
 
 # This line, overwriting the `newperms` command above will allow the user to run
 # serveral important commands, `shutdown`, `reboot`, updating, etc. without a password.
