@@ -3,6 +3,8 @@
 ,xorg-xwininfo,"allows querying information about windows."
 ,xorg-xinit,"starts the graphical server."
 ,ttf-linux-libertine,"provides the sans and serif fonts for LARBS."
+,gnu-free-fonts, "provides the free fonts for LARBS."
+,noto-fonts, "provides the noto fonts for LARBS."
 A,lf-git,"is an extensive terminal file manager that everyone likes."
 ,bc,"is used for a dropdown calculator."
 ,xcompmgr,"is for transparency and removing screen-tearing."
