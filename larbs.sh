@@ -58,7 +58,7 @@ preinstallmsg() { \
 adduserandpass() { \
 	# Adds user `$name` with password $pass1.
 	dialog --infobox "Adding user \"$name\"..." 4 50
-	useradd -m -g wheel -s /bin/zsh "$name" >/dev/null 2>&1 ||
+	useradd -m -G wheel -s /bin/zsh "$name" >/dev/null 2>&1 ||
 	usermod -a -G wheel "$name" && mkdir -p /home/"$name" && chown "$name":wheel /home/"$name"
 	export repodir="/home/$name/.local/src"; mkdir -p "$repodir"; chown -R "$name":wheel "$(dirname "$repodir")"
 	echo "$name:$pass1" | chpasswd
@@ -79,7 +79,7 @@ refreshkeys() { \
 Include = /etc/pacman.d/mirrorlist-arch" >> /etc/pacman.conf
 			done
 			pacman -Sy >/dev/null 2>&1
-			pacman-key --populate archlinux
+			pacman-key --populate archlinux >/dev/null 2>&1
 			;;
 	esac ;}
 
@@ -241,7 +241,7 @@ sed -i "s/^#ParallelDownloads = 8$/ParallelDownloads = 5/;s/^#Color$/Color/" /et
 # Use all cores for compilation.
 sed -i "s/-j2/-j$(nproc)/;s/^#MAKEFLAGS/MAKEFLAGS/" /etc/makepkg.conf
 
-manualinstall yay-bin || error "Failed to install AUR helper."
+manualinstall yay || error "Failed to install AUR helper."
 
 # The command that does all the installing. Reads the progs.csv file and
 # installs each needed program the way required. Be sure to run this only after
