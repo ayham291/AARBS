@@ -179,6 +179,96 @@ installationloop() {
 	done </tmp/progs.csv
 }
 
+enablesecurebot() {
+	if ! whiptail --title "Enable Secure Boot" --yesno "Would you like to enable Secure Boot?" 5 40; then
+		whiptail --title "Secure Boot Aborted" --msgbox "Secure Boot was not enabled." 8 70
+		return 1
+	fi
+
+
+	# Ensure required packages
+	aurinstall shim-signed
+	installpkg efibootmgr >/dev/null 2>&1
+
+	# Verify system is booted in EFI mode
+	[ -d /sys/firmware/efi ] || {
+		whiptail --title "Secure Boot" --msgbox "System does not appear to be booted in UEFI mode (/sys/firmware/efi not found). Aborting shim setup." 8 70
+		return 1
+	}
+
+	# Detect ESP mount point (common locations) and validate
+	esp_mount=""
+	for mp in /boot /boot/efi /efi; do
+		if mountpoint -q "$mp" && [ -d "$mp/EFI" ]; then
+			esp_mount="$mp"
+			break
+		fi
+	done
+
+	[ -n "$esp_mount" ] || {
+		whiptail --title "Secure Boot" --msgbox "EFI System Partition (ESP) not found at /boot, /boot/efi, or /efi. Please ensure the ESP is mounted and try again." 8 70
+		return 1
+	}
+
+	# Paths per ArchWiki (Set up shim)
+	bootdir="$esp_mount/EFI/BOOT"
+	mkdir -p "$bootdir"
+
+	# Rename current boot loader to grubx64.efi so shim will load it by default
+	if [ -f "$bootdir/BOOTx64.EFI" ]; then
+		mv "$bootdir/BOOTx64.EFI" "$bootdir/grubx64.efi"
+	elif [ -f "$bootdir/BOOTX64.EFI" ]; then
+		mv "$bootdir/BOOTX64.EFI" "$bootdir/grubx64.efi"
+	else
+		whiptail --title "Secure Boot" --msgbox "Could not find fallback boot loader at $bootdir/BOOTx64.EFI. Ensure a fallback loader exists before enabling shim." 8 70
+		return 1
+	fi
+
+	# Copy shim and MokManager; DO NOT copy fbx64.efi unless using bootx64.csv
+	cp /usr/share/shim-signed/shimx64.efi "$bootdir/BOOTx64.EFI"
+	cp /usr/share/shim-signed/mmx64.efi "$bootdir/"
+
+	# Create NVRAM entry pointing to fallback shim
+	# Resolve the device backing the ESP mount
+	esp_source=$(findmnt -no SOURCE --target "$esp_mount")
+	# If source is a UUID label, resolve to a real block device
+	case "$esp_source" in
+		UUID=*|LABEL=*|PARTUUID=*|PARTLABEL=*)
+			esp_part=$(blkid -t "$esp_source" -o device 2>/dev/null)
+			;;
+		*)
+			esp_part="$esp_source"
+			;;
+	esac
+	esp_part=$(readlink -f "$esp_part")
+
+	[ -b "$esp_part" ] || {
+		whiptail --title "Secure Boot" --msgbox "Unable to resolve ESP block device for $esp_mount. Aborting." 8 70
+		return 1
+	}
+
+	# Derive disk and partition number for efibootmgr
+	pkname=$(lsblk -no PKNAME "$esp_part")
+	partnum=$(lsblk -no PARTN "$esp_part")
+	[ -n "$pkname" ] && disk="/dev/$pkname" || disk="$esp_part"
+	[ -n "$partnum" ] || partnum=$(echo "$esp_part" | sed -E 's|.*[^0-9]([0-9]+)$|\1|')
+
+	# Confirmation to continue - show the partition and the UUID
+	if ! whiptail --title "Secure Boot" --yesno "The boot partition is $esp_part and the UUID is $esp_source. Continue?" 8 70; then
+		whiptail --title "Secure Boot Aborted" --msgbox "Secure Boot was not enabled." 8 70
+		return 1
+	fi
+
+
+	# Create (or update) the entry
+	efibootmgr --unicode --disk "$disk" --part "$partnum" --create --label "Shim" --loader /EFI/BOOT/BOOTx64.EFI >/dev/null 2>&1 || {
+		whiptail --title "Secure Boot" --msgbox "Failed to create NVRAM boot entry with efibootmgr. You may need to create it manually." 8 70
+		return 1
+	}
+
+	whiptail --title "Secure Boot" --msgbox "Shim has been set up per ArchWiki guidance. On next boot, use MokManager to enroll a MOK key or hashes as desired." 10 70
+}
+
 putgitrepo() {
 	# Downloads a gitrepo $1 and places the files in $2 only overwriting conflicts
 	whiptail --infobox "Downloading and installing config files..." 7 60
@@ -191,42 +281,6 @@ putgitrepo() {
 		--recurse-submodules "$1" "$dir"
 	sudo -u "$name" cp -rfT "$dir" "$2"
 }
-
-makewifi() {
-    dialog --colors --title " Enable wifi " --yesno "Would you like to enable wifi?" 5 40
-    if [ $? = 0 ]; then
-        dialog --infobox "$?" 5 40
-        wifi=$(dialog --inputbox "First, please enter a name of the wiFi." 8 60 3>&1 1>&2 2>&3 3>&1) || exit 1
-        wifipass=$(dialog --no-cancel --passwordbox "Enter a password for that WiFi." 8 60 3>&1 1>&2 2>&3 3>&1)
-        dialog --infobox "Preparing wifi..." 4 50
-        sudo pacman -S --noconfirm --needed wpa_supplicant wpa_supplicant-gui
-    echo "ctrl_interface=/run/wpa_supplicant
-ctrl_interface_group=wheel
-update_config=1
-
-network={
-    ssid=\"$wifi\"
-    psk=\"$wifipass\"
-    key_mgmt=WPA-PSK
-    pairwise=CCMP TKIP
-    group=CCMP TKIP
-}"          | sudo tee /etc/wpa_supplicant/wpa_supplicant.conf > /dev/null
-        sudo systemctl enable wpa_supplicant.service
-        sudo systemctl start wpa_supplicant.service
-        dialog --infobox "Wifi is enabled connected to $wifi" 4 50
-        sleep 1 && ping "archlinux.org" -c 1 >/dev/null 2>&1 && dialog --infobox "Connected to the internet" 4 50
-    fi
-    }
-
-optimusmanager() {
-    dialog --colors --title " Enable Optimus Manager " --yesno "Would you like to enable Optimus Manager?" 5 40
-    if [ $? = 0 ]; then
-        dialog --infobox "$?" 5 40
-        aurinstall optimusmanager
-        sudo systemctl enable optimus-manager.service
-        sudo systemctl start optimus-manager.service
-    fi
-    }
 
 finalize() {
 	whiptail --title "All done!" \
@@ -304,9 +358,6 @@ rm -rf "/home/$name/.git/" "/home/$name/README.md" "/home/$name/LICENSE" "/home/
 [ -s "/home/$name/.config/newsboat/urls" ] ||
 	echo "$rssurls" | sudo -u "$name" tee "/home/$name/.config/newsboat/urls" >/dev/null
 
-# Install vim plugins if not alread present.
-[ ! -f "/home/$name/.config/nvim/autoload/plug.vim" ] && vimplugininstall
-
 # Most important command! Get rid of the beep!
 rmmod pcspkr
 echo "blacklist pcspkr" >/etc/modprobe.d/nobeep.conf
@@ -344,6 +395,8 @@ echo "%wheel ALL=(ALL:ALL) NOPASSWD: /usr/bin/shutdown,/usr/bin/reboot,/usr/bin/
 echo "Defaults editor=/usr/bin/nvim" >/etc/sudoers.d/02-larbs-visudo-editor
 mkdir -p /etc/sysctl.d
 echo "kernel.dmesg_restrict = 0" > /etc/sysctl.d/dmesg.conf
+
+enablesecurebot || error "Failed to enable Secure Boot."
 
 # Cleanup
 rm -f /etc/sudoers.d/larbs-temp
